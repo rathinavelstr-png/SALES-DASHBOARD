@@ -5,7 +5,6 @@
 import streamlit as st
 import pandas as pd
 import random
-import time
 from datetime import datetime
 import requests
 import plotly.express as px
@@ -14,23 +13,25 @@ from streamlit_autorefresh import st_autorefresh
 # ================================
 # CONFIG
 # ================================
-API_KEY = "YOUR_OPENWEATHER_API_KEY"  # <-- Replace this
-REFRESH_INTERVAL = 30 * 1000  # 30 seconds
+st.set_page_config(page_title="Live Revenue Pulse", layout="wide")
+
+API_KEY = st.secrets.get("API_KEY", "YOUR_OPENWEATHER_API_KEY")  # safer
+REFRESH_INTERVAL = 30 * 1000  # 30 sec
 
 # ================================
 # AUTO REFRESH
 # ================================
-st_autorefresh(interval=REFRESH_INTERVAL, key="data_refresh")
-
-st.set_page_config(page_title="Live Revenue Pulse", layout="wide")
+st_autorefresh(interval=REFRESH_INTERVAL, key="refresh")
 
 st.title("📊 Live Revenue Pulse Dashboard")
 
 # ================================
-# SAMPLE DATA STORAGE
+# SESSION STATE INIT
 # ================================
 if "sales_data" not in st.session_state:
-    st.session_state.sales_data = pd.DataFrame(columns=["Time", "Product", "Price", "City"])
+    st.session_state.sales_data = pd.DataFrame(
+        columns=["Time", "Product", "Price", "City"]
+    )
 
 # ================================
 # FAKE DATA GENERATION
@@ -46,7 +47,7 @@ def generate_fake_sale():
         "City": random.choice(cities)
     }
 
-# Add new sale every refresh
+# Add new row
 new_sale = generate_fake_sale()
 st.session_state.sales_data = pd.concat(
     [st.session_state.sales_data, pd.DataFrame([new_sale])],
@@ -56,9 +57,9 @@ st.session_state.sales_data = pd.concat(
 df = st.session_state.sales_data
 
 # ================================
-# METRICS (Day 2)
+# METRICS
 # ================================
-total_revenue = df["Price"].sum()
+total_revenue = int(df["Price"].sum())
 total_orders = len(df)
 
 col1, col2 = st.columns(2)
@@ -67,22 +68,30 @@ col1.metric("💰 Total Revenue", f"₹{total_revenue:,}")
 col2.metric("📦 Total Orders", total_orders)
 
 # ================================
-# SALES CHART
+# CHART
 # ================================
 st.subheader("📈 Sales by City")
 
-city_sales = df.groupby("City")["Price"].sum().reset_index()
+city_sales = df.groupby("City", as_index=False)["Price"].sum()
 
 fig = px.bar(city_sales, x="City", y="Price", title="Revenue by City")
 st.plotly_chart(fig, use_container_width=True)
 
 # ================================
-# WEATHER FUNCTION (Day 3)
+# WEATHER FUNCTION (CACHED)
 # ================================
+@st.cache_data(ttl=600)
 def get_weather(city):
+    if API_KEY == "YOUR_OPENWEATHER_API_KEY":
+        return "No API", "No API", "⚠️ Add API key"
+
     try:
         url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={API_KEY}&units=metric"
-        response = requests.get(url)
+        response = requests.get(url, timeout=5)
+
+        if response.status_code != 200:
+            return "Error", "Error", "⚠️ API issue"
+
         data = response.json()
 
         weather_main = data["weather"][0]["main"]
@@ -97,8 +106,8 @@ def get_weather(city):
 
         return weather_main, temp, impact
 
-    except:
-        return "N/A", "N/A", "Weather unavailable"
+    except Exception:
+        return "N/A", "N/A", "❌ Weather unavailable"
 
 # ================================
 # WEATHER DISPLAY
